@@ -182,20 +182,58 @@ else
   existing_erlang_key = ''
 end
 
+# if node['rabbitmq']['cluster'] && (node['rabbitmq']['erlang_cookie'] != existing_erlang_key)
+#   template node['rabbitmq']['erlang_cookie_path'] do
+#     source 'doterlang.cookie.erb'
+#     owner 'rabbitmq'
+#     group 'rabbitmq'
+#     mode 00400
+#     notifies :stop, "service[#{node['rabbitmq']['service_name']}]", :immediately
+#     notifies :start, "service[#{node['rabbitmq']['service_name']}]", :immediately
+#     notifies :run, 'execute[reset-node]', :immediately
+#   end
+
+#   # Need to reset for clustering #
+#   execute 'reset-node' do
+#     command 'rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl start_app'
+#     action :nothing
+#   end
+# end
+
 if node['rabbitmq']['cluster'] && (node['rabbitmq']['erlang_cookie'] != existing_erlang_key)
+  execute "sleep 10" do
+    action :nothing
+  end
+
+  directory "/var/lib/rabbitmq/mnesia" do
+    action :nothing
+    recursive true
+  end
+
+  log "stopping service[#{node['rabbitmq']['service_name']}] before changing erlang_cookie" do
+    level :info
+    notifies :run, "execute[sleep 10]", :immediately
+    notifies :stop, "service[#{node['rabbitmq']['service_name']}]", :immediately
+  end
+
   template node['rabbitmq']['erlang_cookie_path'] do
     source 'doterlang.cookie.erb'
     owner 'rabbitmq'
     group 'rabbitmq'
     mode 00400
-    notifies :stop, "service[#{node['rabbitmq']['service_name']}]", :immediately
-    notifies :start, "service[#{node['rabbitmq']['service_name']}]", :immediately
-    notifies :run, 'execute[reset-node]', :immediately
   end
 
-  # Need to reset for clustering #
-  execute 'reset-node' do
-    command 'rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl start_app'
-    action :nothing
+  log "removing /var/lib/rabbitmq/mnesia to reset clustering" do
+    level :info
+    notifies :delete, "directory[/var/lib/rabbitmq/mnesia]", :immediately
+  end
+
+  # TODO(breu): figure out why we need the extra sleep statement here.  This
+  #             doesn't break in jenkins, but QE was seeing consistent failures
+  #             of rabbitmq startups
+  log "starting service[#{node['rabbitmq']['service_name']}] after changing erlang_cookie" do
+    level :info
+    notifies :run, "execute[sleep 10]", :immediately
+    notifies :start, "service[#{node['rabbitmq']['service_name']}]", :immediately
   end
 end
